@@ -1,0 +1,6 @@
+customtkinter>=6.0.0
+edge-tts>=7.3.1
+requests>=2.32.0
+imageio-ffmpeg>=0.6.0
+pillow>=13.0.0
+pyinstaller>=6.11.0

@@ -1,0 +1,10 @@
+{
+  "api_key": "",
+  "output_dir": "C:\\Users\\Laptop\\Videos\\AIAds",
+  "default_language": "English",
+  "default_model": "auto",
+  "aspect": "9:16",
+  "duration": 8,
+  "captions": true,
+  "music": true
+}
