@@ -1,4 +1,6 @@
+import base64
 import ctypes
+import io
 import os
 import queue
 import shutil
@@ -11,6 +13,9 @@ import webbrowser
 from pathlib import Path
 
 FROZEN = getattr(sys, "frozen", False)
+
+# Embedded placeholder image (1x1 pixel red) for when reference image is unavailable
+_BASE64_PLACEHOLDER = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 
 if not FROZEN:
     _REQUIRED = {"customtkinter": "customtkinter", "edge_tts": "edge-tts", "requests": "requests",
@@ -87,6 +92,7 @@ class App(ctk.CTk):
         self._suggestions = ["", ""]
         self._thumb_img = None
         self._ref_thumb = None
+        self._badge_img = None
         self._resume_project = ""
         self._active_project_dir = ""
         self._recent_sig = None
@@ -96,10 +102,39 @@ class App(ctk.CTk):
         self._build_header()
         self._build_body()
         self._load_settings_to_ui()
-        self.after(200, self._fit_to_screen)
+        self.after(200, self._try_load_badge_later)
         self.after(120, self._poll_log_queue)
         self.after(900, self._poll_recent)
         threading.Thread(target=self.run_system_check, daemon=True).start()
+
+    def _badge_path(self):
+        """Locate badge.png next to the app (project folder), output folder, or cwd."""
+        candidates = [
+            config.app_dir() / "badge.png",
+            Path(self.cfg.get("output_dir", ".") or ".") / "badge.png",
+            Path.cwd() / "badge.png",
+        ]
+        for c in candidates:
+            try:
+                if c.exists():
+                    return c
+            except OSError:
+                continue
+        return None
+
+    def _try_load_badge_later(self):
+        """Try to load badge.png into the top bar after UI is fully built."""
+        try:
+            badge_path = self._badge_path()
+            if badge_path is not None:
+                img = Image.open(badge_path)
+                img.thumbnail((260, 90))
+                self._badge_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                self.badge_label.configure(image=self._badge_img, text="", padx=0)
+            else:
+                self.badge_label.configure(image=None, text="Made With Pollination")
+        except Exception:
+            self.badge_label.configure(image=None, text="Made With Pollination")
 
     def _set_geometry(self, h=900):
         wa = _workarea()
@@ -245,6 +280,9 @@ class App(ctk.CTk):
                      font=_font(18, "bold")).pack(anchor="w")
         ctk.CTkLabel(titles, text="7-10s ads  ·  21 languages  ·  AI script + visuals + voiceover",
                      text_color=MUTED, font=_font(11)).pack(anchor="w")
+        self.error_label = ctk.CTkLabel(header, text="", text_color=ERR_RED, font=_font(12, "bold"),
+                                        anchor="w")
+        self.error_label.pack(side="left", fill="y", padx=18, pady=4)
         pill = ctk.CTkLabel(header, text=" checking...", fg_color=ACCENT_SOFT, corner_radius=14,
                             text_color=MUTED, font=_font(11, "bold"), padx=14, pady=6, width=190)
         pill.pack(side="right", padx=20)
@@ -453,6 +491,10 @@ class App(ctk.CTk):
         self.progress.pack(fill="x", pady=(4, 2))
         self.progress.set(0)
 
+        self.badge_label = ctk.CTkLabel(
+            form, text="Made With Pollination", text_color=MUTED, font=_font(12, "bold"))
+        self.badge_label.pack(anchor="w", pady=(8, 0))
+
         side = ctk.CTkFrame(columns, fg_color=CARD, corner_radius=14, width=280,
                             border_width=1, border_color=BORDER)
         side.grid(row=0, column=1, sticky="nsew")
@@ -577,7 +619,7 @@ class App(ctk.CTk):
 
     def _set_ref_image(self, path, note=""):
         self.ref_image_path = path
-        name = Path(path).name
+        name = Path(path).name if path else "embedded"
         self.ref_label.configure(text=f"  {name}", text_color=TEXT)
         try:
             img = Image.open(path)
@@ -589,7 +631,22 @@ class App(ctk.CTk):
                 caption += f" ({note})"
             self.thumb_caption.configure(text=caption + "\nwill be the hero of the video")
         except Exception:
-            self.thumb_caption.configure(text=f"Reference: {name}")
+            # Try loading badge.png from project/app directory if original path fails
+            if "badge" in (path or "").lower():
+                try:
+                    badge_path = self._badge_path()
+                    if badge_path is not None:
+                        img = Image.open(badge_path)
+                        img.thumbnail((220, 220))
+                        self._ref_thumb = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                        self.thumb_label.configure(image=self._ref_thumb, text="")
+                        self.thumb_caption.configure(text=f"Reference image: {badge_path.name}\nwill be the hero of the video")
+                        return
+                except Exception:
+                    pass
+            # Show text badge name if image cannot be loaded
+            self.thumb_label.configure(image=None, text=f"badge: {name}" if name else "no image selected (optional)")
+            self.thumb_caption.configure(text="")
 
     def rotate_reference(self):
         if not self.ref_image_path or not Path(self.ref_image_path).exists():
